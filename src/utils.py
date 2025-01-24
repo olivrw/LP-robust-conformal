@@ -97,7 +97,7 @@ def perturb_test_scores(tst_scores, corrupt_ratio, noise_upper=1., noise_lower=-
     return perturbed_tstscores + noise
 
 
-def plot_cp(data, plt_type, plt_name, alpha=0.1, 
+def plot_cp(data, plt_type, plt_name, alpha=0.1, save_dir=None, 
             group_labels=['SC', '$LP_\epsilon$', '$\chi^2$']):
     
     colors = ['#1f77b4', '#dc143c', '#2ca02c']
@@ -132,9 +132,10 @@ def plot_cp(data, plt_type, plt_name, alpha=0.1,
         plt.axhline(y=1 - alpha, color='darkred', linestyle='-', alpha=0.9, linewidth=2)
 
     plt.tight_layout()
-    plt.savefig(plt_name + ".png", dpi=300, bbox_inches='tight')
+    os.makedirs(save_dir, exist_ok=True)    
+    plt.savefig(os.path.join(save_dir, plt_name), dpi=300, bbox_inches='tight')
     plt.show()
-
+    
     
 def eps_rho_plot(arr,
                  plt_type='Coverage',

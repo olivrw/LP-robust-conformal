@@ -66,7 +66,7 @@ class LPRobustCP:
     # Compute the robust empirical quantile
     def lp_robust_quantile(self, calib_scores, rho: float, epsilon: float, k=1.):
         n = calib_scores.shape[0]
-        alpha_prime = (n + 1) * self.alpha / n - rho / n
+        alpha_prime = self.alpha + (self.alpha-rho-2)/n
         q_level = 1. - alpha_prime + rho
         return np.quantile(calib_scores, q_level, method='higher') + k*epsilon
 
