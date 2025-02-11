@@ -22,7 +22,7 @@ parser.add_argument('--corrupt_ratio',  type=float, default=0.05, help="percent 
 parser.add_argument('--noise_upper',    type=float, default=1.,   help="std used for noising images")
 parser.add_argument('--noise_lower',    type=float, default=-1.,  help="std used for noising images")
 parser.add_argument('--worst_case',     type=int,   default=0,    help="boolean for considering w.c. distribution or not")
-parser.add_argument('--data_dir',       type=str,   default='../LP-Conformal/datasets/ImageNet/val', help="dir to imagenet val data")
+parser.add_argument('--data_dir',       type=str,   default='../LP-robust-conformal/datasets/ImageNet/val', help="dir to imagenet val data")
 parser.add_argument('--save',           type=str,   default='experiments/imgnet', help="define the save directory")
 args = parser.parse_args()
 
