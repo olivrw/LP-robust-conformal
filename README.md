@@ -11,20 +11,17 @@ The code implements three conformal prediction approaches:
 
 ## Experiments
 
-We conduct experiments on two datasets:
+We conduct experiments on 3 classification datasets:
 
 ### ImageNet
 Located in the `imgnet/` folder:
 - `imgnet_exp.py`:  ImageNet experiments under data-space distribution shift 
-- `imgnet_score_exp.py`: ImageNet experiments under score-space distribution shift
 The trained predictor we use is the torch pretrained ResNet152 model
 
 ### MNIST 
 Located in the `mnist/` folder:
 - `mnist_exp.py`:  MNIST experiments under data-space distribution shift
-- `mnist_score_exp.py`: MNIST experiments under score-space distribution shift
-The trained predictor we use is a simple ResNet trained using:
-- `train_mnist.py`: ImageNet experiments under score-space distribution shift
+- `train_mnist.py`: Training script for a simple NN
 
 ### iWildCam  
 Located in the `wilds/` folder:
