@@ -30,10 +30,9 @@ class SimpleCNN(nn.Module):
     
 
 if __name__ == "__main__":
-    # 1) Set device
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 2) Define MNIST transforms
     mean, std = (0.1307,), (0.3081,)
     train_transforms = transforms.Compose([
         transforms.ToTensor(),
@@ -44,14 +43,12 @@ if __name__ == "__main__":
         transforms.Normalize(mean, std)
     ])
 
-    # 3) Load datasets and create loaders
     train_dataset = torchvision.datasets.MNIST(
         root='./datasets',
         train=True,
         download=False,
         transform=train_transforms
     )
-
     test_dataset = torchvision.datasets.MNIST(
         root='./datasets',
         train=False,
@@ -62,16 +59,10 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-    # 4) Define the CNN architecture
-
-
     model = SimpleCNN().to(device)
-
-    # 5) Loss and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
-    # 6) Training function
     def train_model(model, train_loader, criterion, optimizer, num_epochs=5):
         model.train()
         for epoch in range(num_epochs):
@@ -93,7 +84,6 @@ if __name__ == "__main__":
             epoch_loss = running_loss / len(train_loader.dataset)
             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}")
 
-    # 7) Evaluation function
     def evaluate(model, test_loader):
         model.eval()
         correct = 0
@@ -109,13 +99,8 @@ if __name__ == "__main__":
         accuracy = 100.0 * correct / total
         return accuracy
 
-    # 8) Execute training
     train_model(model, train_loader, criterion, optimizer, num_epochs=5)
-
-    # 9) Check final accuracy
     test_acc = evaluate(model, test_loader)
     print(f"Final Test Accuracy: {test_acc:.2f}%")
-
-    # 10) Save model checkpoint
     torch.save(model.state_dict(), "mnist_cnn.pth")
     print("Trained model saved as 'mnist_cnn.pth'")
