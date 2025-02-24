@@ -1,12 +1,15 @@
 # Robust Conformal Prediction with Levy-Prokhorov Distribution Shift
 
-This repository contains the implementation of our robust conformal prediction algorithm using Levy-Prokhorov distance.
+This repository implements a conformal prediction algorithm that is robust to Levy-Prokhorov type distribution shifts.
+
+Paper: "Conformal Prediction under Lévy-Prokhorov Distribution Shifts: Robustness to Local and Global Perturbations" 
+https://arxiv.org/abs/2502.14105
 
 ## Overview
 
 The code implements three conformal prediction approaches:
 - Standard conformal prediction
-- LP-robust conformal prediction (our method)
+- LP robust conformal prediction (our method)
 - f-divergence robust conformal prediction
 
 ## Experiments
