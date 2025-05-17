@@ -1,5 +1,6 @@
 import os
 import torch
+import ot
 import numpy as np
 import torchvision
 from torchvision import datasets
@@ -10,7 +11,14 @@ import seaborn as sns
 import torch.nn.functional as F
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-# specify device
+from matplotlib.ticker import FixedLocator
+from brokenaxes import brokenaxes
+from matplotlib.lines import Line2D
+import pandas as pd
+import re
+import matplotlib.colors as mcolors
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -50,7 +58,23 @@ def load_mnist_valdata(data_dir, preprocess, cal_ratio, batch_size, seed):
 def nll_score(model, features, labels=None):
     with torch.no_grad():
         outputs = model(features.to(device))
-        return -F.log_softmax(outputs, dim=1)    # shape (n_images, n_labels)
+        return -F.log_softmax(outputs, dim=1)    
+    
+
+def indicator_cost_plan(samples1, samples2, epsilon, reg=0.05):
+    n = len(samples1)
+    m = len(samples2)
+    a = np.ones(n) / n  
+    b = np.ones(m) / m  
+
+    x = samples1[:, np.newaxis]
+    y = samples2[np.newaxis, :]
+    cost_matrix = (np.abs(x - y) >= epsilon).astype(float)
+    
+    # Compute optimal transport plan
+    transport_plan = ot.sinkhorn(a, b, cost_matrix, reg)
+    total_cost = np.sum(transport_plan * cost_matrix)
+    return total_cost, transport_plan, cost_matrix
 
 
 def perturb_test_data(features, labels, corrupt_ratio, noise_upper=1., noise_lower=-1., worst_case=False):
@@ -97,96 +121,258 @@ def perturb_test_scores(tst_scores, corrupt_ratio, noise_upper=1., noise_lower=-
     return perturbed_tstscores + noise
 
 
-def plot_cp(data, plt_type, plt_name, alpha=0.1, save_dir=None, 
-            group_labels=['SC', '$LP_\epsilon$', '$\chi^2$']):
-    
-    colors = ['#1f77b4', '#dc143c', '#2ca02c']
+_ORDER_CACHE: list[int] | None = None
 
-    plt.figure(figsize=(3, 2.8))
-    for i, group_data in enumerate(data):
-        group_data = np.array(group_data)
-        x_center = i
-        jitter = (np.random.rand(len(group_data)) - 0.5) * 0.4  
-        x_vals = x_center + jitter
+def _compute_order_by_mean(data_arr: list[np.ndarray]) -> list[int]:
+    means = [float(np.nanmean(g)) for g in data_arr]
+    return list(np.argsort(means))
 
-        col = colors[i % len(colors)]
 
-        # Scatter for each group
-        plt.scatter(x_vals, group_data,
-                    color=col,
-                    alpha=0.5,
-                    edgecolor='white',
-                    s=100)
+def plot_cp(
+    data,
+    plt_type,
+    plt_name,
+    *,
+    alpha: float = 0.1,
+    save_dir: str | None = None,
+    group_labels: list[str] | None = None,
+    highlight_groups: tuple[str, ...] = (
+        r"$\mathbf{LP}_{\boldsymbol{\epsilon}}$",
+        r"$\mathbf{LP}^{\mathbf{est}}_{\boldsymbol{\epsilon}}$",
+    ),
+    ylims=((0, 30), (885, 915)),
+    target_band: tuple[float, float] | None = (0.89, 0.91),
+    highlight_color: str = "#d62728",  
+    other_color: str = "#7393B3",      
+):
 
-        # Draw a horizontal line for the mean
-        mean_val = np.mean(group_data)
-        plt.hlines(y=mean_val,
-                   xmin=x_center - 0.4, 
-                   xmax=x_center + 0.4,
-                   color=col,
-                   linewidth=3)
+    global _ORDER_CACHE
 
-    plt.xticks(range(len(data)), group_labels, fontsize=11)
-    plt.title(plt_type, fontsize=15)
-    if plt_type == 'Coverage':
-        plt.axhline(y=1 - alpha, color='darkred', linestyle='-', alpha=0.9, linewidth=2)
+    if group_labels is None:
+        group_labels = [
+            "SC",
+            r"$\mathbf{LP}_{\boldsymbol{\epsilon}}$",
+            r"$\mathbf{LP}^{\mathbf{est}}_{\boldsymbol{\epsilon}}$",
+            r"$\chi^2$",
+            "FG‑CP",
+            "RSCP",
+            "Weight",
+        ]
+
+    if len(data) != len(group_labels):
+        raise ValueError("*data* and *group_labels* lengths mismatch.")
+
+    # Convert to ndarray for numeric operations
+    data_arr = [np.asarray(g) for g in data]
+
+    marker_map_spec = {
+        r"$\mathbf{LP}_{\boldsymbol{\epsilon}}$": "^",  
+        r"$\mathbf{LP}^{\mathbf{est}}_{\boldsymbol{\epsilon}}$": "v",  
+        "SC": "o",          
+        r"$\chi^2$": "s", 
+        "FG‑CP": "D",       
+        "RSCP": "H",        
+        "Weight": "X",      
+    }
+
+    fallback_cycle = iter(["P", "<", ">", "*", "+"])
+    marker_map: dict[str, str] = {}
+    for lbl in group_labels:
+        if lbl in marker_map_spec:
+            marker_map[lbl] = marker_map_spec[lbl]
+        else:
+            marker_map[lbl] = next(fallback_cycle, "o")
+
+    if plt_type == "Coverage":
+        order = _compute_order_by_mean(data_arr)
+        _ORDER_CACHE = order
+    elif plt_type == "Size" and _ORDER_CACHE is not None:
+        order = _ORDER_CACHE
+    else:
+        order = list(range(len(data_arr)))
+
+    data_arr = [data_arr[i] for i in order]
+    group_labels = [group_labels[i] for i in order]
+
+    colours = [
+        highlight_color if any(h in lbl for h in highlight_groups) else other_color
+        for lbl in group_labels
+    ]
+
+    use_broken = plt_type == "Size" and ylims is not None
+    fig_size = (6.0, 3.0)
+
+    if use_broken:
+        fig = plt.figure(figsize=fig_size)
+        ax = brokenaxes(ylims=ylims, hspace=0.05, despine=False, fig=fig)
+    else:
+        fig, _ax = plt.subplots(figsize=fig_size)
+        ax = _ax
+
+    for i, (grp, lbl, col) in enumerate(zip(data_arr, group_labels, colours)):
+        x_c = i
+        jitter = (np.random.rand(len(grp)) - 0.5) * 0.35
+        x_vals = x_c + jitter
+        marker = marker_map[lbl]
+        
+        ax.scatter(
+            x_vals,
+            grp,
+            marker=marker,
+            color=col,
+            alpha=0.65 if col == highlight_color else 0.9,
+            edgecolor="white",
+            linewidth=0.5,
+            s=120 if col == highlight_color else 80,
+            zorder=3,
+        )
+
+        mean_val = float(np.nanmean(grp))
+        ax.hlines(
+            y=mean_val,
+            xmin=x_c - 0.35,
+            xmax=x_c + 0.35,
+            color=col,
+            linewidth=3,
+            zorder=4,
+        )
+
+    locs = np.arange(len(data_arr))
+    axes_to_fix = ax.axs if hasattr(ax, "axs") else [ax]
+
+    for a in axes_to_fix:
+        a.xaxis.set_major_locator(FixedLocator(locs))
+        a.set_xticklabels(group_labels, fontsize=11)
+
+        if plt_type == "Coverage" and target_band is not None:
+            a.axhspan(*target_band, color="#b0e0a8", alpha=0.25, zorder=0)
+
+    if plt_type == "Coverage":
+        ax.axhline(1 - alpha, color="k", linestyle="--", linewidth=1.2, zorder=2)
+
+    ax.set_title(plt_type, fontsize=14, pad=8)
 
     plt.tight_layout()
-    os.makedirs(save_dir, exist_ok=True)    
-    plt.savefig(os.path.join(save_dir, plt_name), dpi=300, bbox_inches='tight')
+
+    if use_broken:
+        for h in ax.diag_handles:
+            h.remove()
+        ax.draw_diags()
+
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        fig.savefig(os.path.join(save_dir, plt_name), dpi=300, bbox_inches="tight")
+
     plt.show()
-    
-    
+
+
 def eps_rho_plot(arr,
+                 result_ot,
                  plt_type='Coverage',
-                 scatter_points=True, 
-                 levels=50, 
+                 scatter_points=True,
+                 levels=50,
                  style='darkgrid',
                  context='talk',
                  figsize=(8, 6),
                  point_size=70,
                  alpha=0.8,
-                 highlight_val=0.9, 
-                 savefig_path=None):
+                 highlight_val=0.9,
+                 savefig_path='wilds_cover_plot.png'):
+
 
     sns.set_style(style)
     sns.set_context(context)
-    
-    if plt_type == 'Coverage':
-        palette = 'rocket'
-    else:
-        palette='mako'
-    cmap = sns.color_palette(palette, as_cmap=True)
 
-    val = arr[:, 0]
-    x = arr[:, 1]
-    y = arr[:, 2]
+    palette = 'rocket' if plt_type == 'Coverage' else 'mako'
+    cmap    = sns.color_palette(palette, as_cmap=True)
 
-    triang = tri.Triangulation(x, y)
+    # unpack
+    val, x, y               = arr.T
+    val_ot_raw, x_ot, y_ot  = result_ot.T          
+
+    norm = mcolors.Normalize(vmin=val.min(), vmax=val.max())
 
     fig, ax = plt.subplots(figsize=figsize)
-    contour_f = ax.tricontourf(triang, val, levels=levels, cmap=cmap)
+
+    triang = tri.Triangulation(x, y)
+    contour_f = ax.tricontourf(triang, val, levels=levels,
+                               cmap=cmap, norm=norm)
 
     if scatter_points:
-        sns.scatterplot(x=x, y=y, hue=val, palette=palette, 
-                        alpha=alpha, edgecolor='white', 
-                        s=point_size, ax=ax, legend=False)
+        interpolator   = tri.LinearTriInterpolator(triang, val)
+        val_ot_interp  = interpolator(x_ot, y_ot)
+        valid          = ~np.isnan(val_ot_interp)
 
-    highlight_level = [highlight_val]
-    highlight_contours = ax.tricontour(triang, val, levels=highlight_level,
-                                       colors='black', linewidths=2, linestyles='--')
+        ax.scatter(x_ot[valid], y_ot[valid],
+                   c=val_ot_interp[valid].data,
+                   cmap=cmap, norm=norm,
+                   s=point_size,
+                   edgecolors='white',
+                   linewidths=0.8,
+                   alpha=alpha)
+
+    hc = ax.tricontour(triang, val, levels=[highlight_val],
+                       colors='white', linewidths=2, linestyles='--')
     if plt_type == 'Coverage':
-        ax.clabel(highlight_contours, inline=True, 
-                  fmt={highlight_val: f'val={highlight_val}'})
+        label_xy = [(1.4, 0.024)]
+        ax.clabel(hc, fmt={highlight_val: rf'$Cov={highlight_val}$'}, inline=True, manual=label_xy)
 
-    cbar = fig.colorbar(contour_f, ax=ax)
-    cbar.set_label(plt_type)
+    idx_grid = np.argmin(np.abs(val - highlight_val))
+    x_g, y_g, v_g = x[idx_grid], y[idx_grid], val[idx_grid]
+
+    ax.scatter(x_g, y_g,
+               s=point_size*1.8,
+               facecolors='none', edgecolors='black',
+               linewidths=3, zorder=4,
+               label='Grid Search')
+
+    ax.annotate(
+        rf'$(\epsilon={x_g:.2f}, \rho={y_g:.3f})$'+'\n'+rf'$Size={v_g:.3f}$',
+        xy=(x_g, y_g), xycoords='data',
+        xytext=(-40, -30), textcoords='offset points',
+        arrowprops=dict(arrowstyle='->', lw=1.5),
+        fontsize=13, ha='right', va='bottom', color='white')
+
+    if scatter_points and valid.any():
+        idx_ot = np.argmin(np.abs(val_ot_interp[valid] - highlight_val))
+        x_o = x_ot[valid][idx_ot]
+        y_o = y_ot[valid][idx_ot]
+        v_o = val_ot_raw[valid][idx_ot]
+
+        ax.scatter(x_o, y_o,
+                   s=point_size*1.8, marker='D',
+                   facecolors='none', edgecolors='black',
+                   linewidths=3, zorder=4,
+                   label='Estimated')
+
+        ax.annotate(
+            rf'$(\epsilon={x_o:.2f}, \rho={y_o:.3f})$'+'\n'+rf'$Size={v_o:.3f}$',
+            xy=(x_o, y_o), xycoords='data',
+            xytext=(35, 45), textcoords='offset points',
+            arrowprops=dict(arrowstyle='->', lw=1.5),
+            fontsize=13, ha='left', va='top', color='white')
+
+    # legend
+    ax.legend(loc='upper right', fontsize=14, frameon=True)
+
+    fig.colorbar(contour_f, ax=ax)
+
     ax.set_xlabel(r'$\epsilon$', fontsize=25)
-    ax.set_ylabel(r'$\rho$', fontsize=25)
+    ax.set_ylabel(r'$\rho$',    fontsize=25)
+    ax.set_title(plt_type,      fontsize=25)
     plt.tight_layout()
 
-    if savefig_path is not None:
+    if savefig_path:
         fig.savefig(savefig_path, dpi=300, bbox_inches='tight')
         print(f"Figure saved to {savefig_path}")
+        
+    plt.show()
 
     return fig, ax
+
+
+def parse_tensor(x):
+    match = re.match(r"tensor\((.*)\)", str(x))
+    if match:
+        return float(match.group(1))
+    return float(x)
