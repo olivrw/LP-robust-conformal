@@ -1,4 +1,4 @@
-# Robust Conformal Prediction with Levy-Prokhorov Distribution Shift
+# Robust Conformal Prediction under Levy-Prokhorov Distribution Shift
 
 This repository implements a conformal prediction algorithm that is robust to Levy-Prokhorov type distribution shifts.
 
